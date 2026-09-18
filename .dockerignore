@@ -1,0 +1,8 @@
+.venv
+.git
+data
+__pycache__
+.env
+.DS_Store
+tests
+.railway

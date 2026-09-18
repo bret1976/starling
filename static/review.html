@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Leave a review</title>
+  <link rel="stylesheet" href="/static/app.css"/>
+</head>
+<body>
+  <div class="login">
+    <p class="kicker" id="biz">Starling</p>
+    <h2>Tap a star. That’s the review.</h2>
+    <p class="muted" id="who"></p>
+    <div class="stars-pick" id="stars">
+      <button data-r="1">★</button><button data-r="2">★</button><button data-r="3">★</button>
+      <button data-r="4">★</button><button data-r="5">★</button>
+    </div>
+    <label>Anything we should know?</label>
+    <textarea id="text" placeholder="Optional"></textarea>
+    <button class="btn primary" id="send" style="width:100%;margin-top:12px">Submit</button>
+    <p id="out" class="muted"></p>
+  </div>
+  <script>
+    const token = location.pathname.split("/").pop();
+    let rating = 5;
+    fetch("/api/public/review/" + token).then(r => r.json()).then(d => {
+      document.getElementById("biz").textContent = d.business;
+      document.getElementById("who").textContent = "Hi " + (d.customer_name || "") + " — 30 seconds, promise.";
+    });
+    document.getElementById("stars").onclick = e => {
+      const b = e.target.closest("button");
+      if (!b) return;
+      rating = Number(b.dataset.r);
+      [...document.querySelectorAll("#stars button")].forEach((el, i) => el.style.color = i < rating ? "#f5b301" : "#d0d5dd");
+    };
+    document.getElementById("stars").click();
+    document.getElementById("send").onclick = async () => {
+      const res = await fetch("/api/public/review/" + token, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({rating, text: document.getElementById("text").value})
+      });
+      const d = await res.json();
+      document.getElementById("out").innerHTML = d.message + (d.google_url ? ` <a href="${d.google_url}" target="_blank">Open Google</a>` : "");
+    };
+  </script>
+</body>
+</html>

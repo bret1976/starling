@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Form</title>
+  <link rel="stylesheet" href="/static/app.css"/>
+</head>
+<body>
+  <div class="login">
+    <p class="kicker" id="biz"></p>
+    <h2 id="title">Form</h2>
+    <div id="fields"></div>
+    <button class="btn primary" id="send" style="width:100%;margin-top:12px">Submit</button>
+    <p class="muted" id="out"></p>
+  </div>
+  <script>
+    const slug = location.pathname.split("/").pop();
+    let fields = [];
+    fetch("/api/public/form/" + slug).then(r => r.json()).then(d => {
+      document.getElementById("biz").textContent = d.business;
+      document.getElementById("title").textContent = d.name;
+      fields = (d.fields || "name,email,message").split(",").map(s => s.trim()).filter(Boolean);
+      document.getElementById("fields").innerHTML = fields.map(f =>
+        `<label>${f}</label>${f === "message" ? `<textarea id="f-${f}"></textarea>` : `<input id="f-${f}"/>`}`
+      ).join("");
+    });
+    document.getElementById("send").onclick = async () => {
+      const payload = {};
+      fields.forEach(f => payload[f] = document.getElementById("f-" + f).value);
+      const r = await fetch("/api/public/form/" + slug, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({payload})});
+      document.getElementById("out").textContent = r.ok ? "Got it — we received this in the inbox." : "Could not submit";
+    };
+  </script>
+</body>
+</html>

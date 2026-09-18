@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Starling</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"/>
+  <link rel="stylesheet" href="/static/app.css"/>
+</head>
+<body>
+  <div id="login" class="login hidden">
+    <a class="logo" href="/"><i></i> Starling</a>
+    <h2 id="auth-title">Get reviews on autopilot</h2>
+    <p class="muted" id="auth-lead">After a visit, send a link. Happy ratings go public. Tough ones stay private. Starling writes the reply.</p>
+    <div id="signup-fields">
+      <label>Business name</label><input id="sbusiness" placeholder="Northside Dental"/>
+      <label>Your name</label><input id="sname" placeholder="Maya Patel"/>
+    </div>
+    <label>Email</label><input id="email" placeholder="you@business.com"/>
+    <label>Password</label><input id="password" type="password" placeholder="8+ characters"/>
+    <button class="btn primary" id="signup-btn" style="width:100%;margin-top:12px">Start — it’s free to try</button>
+    <button class="btn ghost" id="login-btn" style="width:100%;margin-top:8px">I already have an account</button>
+    <p class="muted" id="login-err"></p>
+  </div>
+
+  <div id="shell" class="shell hidden">
+    <aside class="side">
+      <div class="logo" style="color:#fff;padding:8px 10px 16px"><i></i> Starling</div>
+      <button class="navb on core" data-view="home">Home</button>
+      <button class="navb core" data-view="inbox">Inbox</button>
+      <button class="navb core" data-view="settings">Settings</button>
+      <button class="navb" id="more-toggle" type="button">More</button>
+      <div id="more-nav" class="hidden">
+        <button class="navb" data-view="listings">Listings</button>
+        <button class="navb" data-view="social">Social</button>
+        <button class="navb" data-view="pages">Pages</button>
+        <button class="navb" data-view="billing">Billing</button>
+        <button class="navb" data-view="agency">Agency</button>
+      </div>
+      <div class="sp"></div>
+      <button class="navb" id="logout">Sign out</button>
+    </aside>
+    <div>
+      <div class="top">
+        <strong id="loc-name">Location</strong>
+        <span class="badge ok" id="plan-badge">Starter</span>
+        <div class="sp"></div>
+        <span class="muted" id="who"></span>
+      </div>
+      <div class="main" id="main"></div>
+    </div>
+  </div>
+  <div class="toast" id="toast"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Location</title>
+  <link rel="stylesheet" href="/static/app.css"/>
+</head>
+<body>
+  <div class="wrap" style="padding:32px 20px">
+    <a class="logo" href="/"><i></i> Starling</a>
+    <h1 id="name"></h1>
+    <p class="muted" id="meta"></p>
+    <p><span class="stars" id="avg"></span></p>
+    <div id="reviews"></div>
+    <h3>From the shop</h3>
+    <div id="posts"></div>
+  </div>
+  <button class="fab" id="fab">💬</button>
+  <div class="widget-box" id="box">
+    <div class="widget-h">Chat with us</div>
+    <div class="widget-m" id="wm"></div>
+    <div style="padding:8px;display:flex;gap:6px">
+      <input id="wname" placeholder="Your name"/>
+    </div>
+    <div style="padding:0 8px 10px;display:flex;gap:6px">
+      <input id="wbody" placeholder="Ask about hours, bookings…"/>
+      <button class="btn primary" id="wsend">Send</button>
+    </div>
+  </div>
+  <script>
+    const slug = location.pathname.split("/").pop();
+    fetch("/api/public/location/" + slug).then(r => r.json()).then(d => {
+      document.title = d.location.name;
+      document.getElementById("name").textContent = d.location.name;
+      document.getElementById("meta").textContent = `${d.location.address}, ${d.location.city} · ${d.location.phone}`;
+      document.getElementById("avg").textContent = "★".repeat(Math.round(d.avg)) + " " + d.avg;
+      document.getElementById("reviews").innerHTML = d.reviews.length
+        ? d.reviews.map(r =>
+        `<div class="card" style="margin:10px 0"><span class="stars">${"★".repeat(r.rating)}</span><p>${r.text || ""}</p></div>`
+      ).join("")
+        : "<p class='muted'>No public reviews yet.</p>";
+      document.getElementById("posts").innerHTML = (d.posts || []).map(p =>
+        `<div class="card" style="margin:10px 0"><small>${p.platform}</small><p>${p.body}</p></div>`
+      ).join("");
+    });
+    document.getElementById("fab").onclick = () => document.getElementById("box").classList.toggle("open");
+    document.getElementById("wsend").onclick = async () => {
+      const body = document.getElementById("wbody").value;
+      const name = document.getElementById("wname").value || "Visitor";
+      const res = await fetch("/api/widget/chat", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({slug, name, body})});
+      const d = await res.json();
+      document.getElementById("wm").textContent = d.reply;
+      document.getElementById("wbody").value = "";
+    };
+  </script>
+</body>
+</html>
