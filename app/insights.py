@@ -92,7 +92,7 @@ _ASPECT_RX = {k: re.compile(rf"\b(?:{v['words']})\b", re.I) for k, v in ASPECTS.
 # Complaint phrasings VADER scores neutral: force a negative reading.
 _COMPLAINTS: list[tuple[str, re.Pattern[str]]] = [
     ("wait", re.compile(r"\bwait(?:ed|ing)?\s+(?:for\s+)?(?:over|almost|about|nearly|like|more than)?\s*(?:an?\s+)?(?:\d+\s*)?(?:min|mins|minutes|hour|hours|hr|hrs|forever)\b", re.I)),
-    ("communication", re.compile(r"\bnever\s+(?:called|call|got|get|heard|responded|answered)\b|\bno\s+(?:call|callback|response|reply)\b|\bdidn'?t\s+(?:call|answer|respond)\b", re.I)),
+    ("communication", re.compile(r"\b(?:never|nobody|no\s+one|no-one)\s+(?:ever\s+)?(?:called|call|got|get|heard|responded|answered|returned|followed)\b|\bno\s+(?:call|callback|response|reply)\b|\bdidn'?t\s+(?:call|answer|respond)\b", re.I)),
     ("price", re.compile(r"\bhidden\s+(?:fee|fees|charge|charges|cost|costs)\b|\bsurprise\s+(?:bill|charge|fee)\b|\bcharged\s+(?:me\s+)?(?:twice|double|extra)\b", re.I)),
     ("booking", re.compile(r"\b(?:cancel(?:l)?ed|rescheduled)\s+(?:on\s+me|my\s+appointment|last\s+minute)\b|\bdouble[- ]booked\b", re.I)),
 ]
@@ -130,11 +130,13 @@ def analyze_review(text: str, rating: float | None = None) -> dict[str, Any]:
     for sent in _sentences(text):
         comp = _analyzer.polarity_scores(sent)["compound"]
         forced = {k for k, rx in _COMPLAINTS if rx.search(sent)}
-        if forced and comp > -0.3:
-            comp = min(comp, 0.0) - 0.4
+        # A complaint pattern ("waited an hour") is negative for *its* aspect only;
+        # other aspects named in the sentence keep VADER's reading.
+        forced_comp = min(comp, 0.0) - 0.4 if comp > -0.3 else comp
         found = {k for k, rx in _ASPECT_RX.items() if rx.search(sent)} | forced
         for aspect in sorted(found):
-            mentions.append({"aspect": aspect, "sentiment": _label(comp), "score": round(comp, 3), "quote": sent[:220]})
+            c = forced_comp if aspect in forced else comp
+            mentions.append({"aspect": aspect, "sentiment": _label(c), "score": round(c, 3), "quote": sent[:220]})
     if any(m["score"] < -0.3 for m in mentions) and overall > 0.3:
         overall = min(overall, 0.2)  # mixed review: do not let one glowing line hide a complaint
     mismatch = None
