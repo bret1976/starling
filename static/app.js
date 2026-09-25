@@ -200,6 +200,8 @@ async function home() {
         : ""
     }
 
+    <div class="card" id="insights-card"><h3>What customers talk about</h3><p class="muted">Reading your reviews…</p></div>
+
     <div class="stats">
       <div class="stat"><small>Public rating</small><b>${d.stats.avg || 0}★</b></div>
       <div class="stat"><small>Public reviews</small><b>${d.stats.reviews}</b></div>
@@ -207,6 +209,7 @@ async function home() {
     </div>
   `;
 
+  loadInsights();
   $("ask-go").onclick = sendAsk;
   $("ask-name").onkeydown = (e) => {
     if (e.key === "Enter") sendAsk();
@@ -240,6 +243,55 @@ async function home() {
       render();
     };
   });
+}
+
+function esc(t) {
+  return String(t ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+}
+
+function insightsHtml(d) {
+  if (!d || !d.with_text) {
+    return `<h3>What customers talk about</h3><p class="muted">Once reviews with comments come in, Starling groups them into themes (staff, wait time, price…) and shows what to fix first. Free — no AI credits used.</p>`;
+  }
+  const label = (k) => (d.aspects.find((a) => a.aspect === k) || {}).label || k;
+  const top = d.aspects.slice(0, 6);
+  const max = Math.max(...top.map((a) => a.mentions), 1);
+  const fix = d.fix_first ? d.aspects.find((a) => a.aspect === d.fix_first) : null;
+  const keep = d.keep_doing ? d.aspects.find((a) => a.aspect === d.keep_doing) : null;
+  const t = d.trend || {};
+  const now = t.last_30d && t.last_30d.avg_sentiment;
+  const prev = t.prev_30d && t.prev_30d.avg_sentiment;
+  const trend = now != null && prev != null ? (now >= prev ? `<span class="badge ok">mood up vs last month</span>` : `<span class="badge bad">mood down vs last month</span>`) : "";
+  return `
+    <h3>What customers talk about ${trend}</h3>
+    <p class="muted">${d.with_text} reviews read · ${d.sentiment.positive} positive · ${d.sentiment.neutral} neutral · ${d.sentiment.negative} negative</p>
+    <div class="ins-grid">
+      ${fix ? `<div class="ins-call bad"><small>Fix first</small><b>${esc(label(d.fix_first))}</b><span>${fix.negative} complaint${fix.negative === 1 ? "" : "s"}</span>${fix.complaints[0] ? `<q>${esc(fix.complaints[0])}</q>` : ""}</div>` : ""}
+      ${keep ? `<div class="ins-call ok"><small>Keep doing</small><b>${esc(label(d.keep_doing))}</b><span>${keep.positive} compliment${keep.positive === 1 ? "" : "s"}</span>${keep.praise[0] ? `<q>${esc(keep.praise[0])}</q>` : ""}</div>` : ""}
+    </div>
+    <div class="ins-bars">
+      ${top
+        .map(
+          (a) => `<div class="ins-row"><span>${esc(a.label)}</span>
+            <div class="ins-bar" title="${a.positive} positive · ${a.neutral} neutral · ${a.negative} negative" style="width:${Math.max(8, (a.mentions / max) * 100)}%">
+              <i class="p" style="flex:${a.positive}"></i><i class="n" style="flex:${a.neutral}"></i><i class="x" style="flex:${a.negative}"></i>
+            </div><small>${a.mentions}</small></div>`
+        )
+        .join("")}
+    </div>
+    ${d.mismatches && d.mismatches.length ? `<p class="muted" style="margin-top:10px"><span class="badge warn">${d.mismatches.length} hidden complaint${d.mismatches.length === 1 ? "" : "s"}</span> high star rating but unhappy words — worth a personal reply.</p>` : ""}
+    ${d.keywords && d.keywords.length ? `<div class="pills-lite">${d.keywords.slice(0, 8).map((k) => `<span>${esc(k.term)} · ${k.count}</span>`).join("")}</div>` : ""}
+  `;
+}
+
+async function loadInsights() {
+  const el = $("insights-card");
+  if (!el) return;
+  try {
+    el.innerHTML = insightsHtml(await api("/api/insights"));
+  } catch (e) {
+    el.innerHTML = `<h3>What customers talk about</h3><p class="muted">Insights unavailable right now.</p>`;
+  }
 }
 
 async function sendAsk() {

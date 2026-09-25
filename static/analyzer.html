@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Free Review Analyzer — Starling</title>
+  <meta name="description" content="Paste your customer reviews and see what people praise and complain about — staff, wait time, price, cleanliness. Free, instant, no signup."/>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"/>
+  <link rel="stylesheet" href="/static/site.css"/>
+</head>
+<body>
+  <header class="top top-bar">
+    <a class="brand" href="/"><svg viewBox="0 0 32 32" fill="none"><path d="M4 18c8-1 12-8 14-14 1 6 5 11 12 13-7 1-11 5-12 13-2-7-7-11-14-12Z" fill="#fff"/></svg> Starling</a>
+    <nav class="links">
+      <a href="/products">Products</a>
+      <a href="/solutions">Solutions</a>
+      <a href="/industries">Industries</a>
+      <a href="/customers">Customers</a>
+      <a href="/resources">Resources</a>
+      <a href="/pricing">Pricing</a>
+    </nav>
+    <div class="top-cta"><a class="signin" href="/app">Sign In</a> <a class="btn-white" href="/demo">Get a Demo →</a></div>
+    <button class="burger" id="burger" type="button" aria-label="Menu">☰</button>
+  </header>
+
+  <div class="page-hero">
+    <div>
+      <p class="eyebrow">Free tool</p>
+      <h1>What are your reviews really saying?</h1>
+      <p class="muted">Paste reviews — one per line. Add a star rating in front if you have it (<code>5 - Loved the team</code>). Starling groups them into themes and tells you what to fix first. Runs instantly, no signup, nothing stored.</p>
+    </div>
+  </div>
+
+  <section class="section">
+    <div class="card" style="max-width:920px;margin:0 auto">
+      <textarea id="rv" rows="9" style="width:100%;box-sizing:border-box;border-radius:12px;border:1px solid #d0d5dd;padding:12px;font:14px Inter,sans-serif;color:#101828" placeholder="5 - Dr. Patel was gentle and the front desk was so friendly
+2 - Waited over an hour and nobody called back about my bill
+4 - Great cleaning, but parking is a nightmare"></textarea>
+      <p style="margin-top:12px"><button class="btn-blue" id="go" type="button" style="border:0;cursor:pointer">Analyze reviews →</button> <button class="btn-ghost" id="sample" type="button" style="cursor:pointer">Try sample reviews</button></p>
+      <div id="out" style="margin-top:18px"></div>
+    </div>
+  </section>
+
+  <style>
+    #out .row3{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin:12px 0}
+    #out .box{border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:12px 14px}
+    #out .bad{border-color:#f04438}
+    #out .ok{border-color:#12b76a}
+    #out small{text-transform:uppercase;letter-spacing:.08em;font-size:11px;opacity:.7}
+    #out b{display:block;font-size:20px;margin:2px 0}
+    #out q{display:block;font-size:14px;opacity:.85;margin-top:6px}
+    #out .bar{display:flex;height:10px;border-radius:999px;overflow:hidden;background:rgba(255,255,255,.08)}
+    #out .bar i{display:block}
+    #out .ln{display:grid;grid-template-columns:170px 1fr 40px;gap:10px;align-items:center;margin:8px 0;font-size:14px}
+  </style>
+  <script>
+    const SAMPLE = `5 - Dr. Patel was gentle and totally painless. Front desk team so friendly!
+2 - Waited over an hour past my appointment. Nobody called back about billing.
+5 - Super clean office and they explained everything.
+4 - Great cleaning but parking is terrible.
+1 - Charged me twice and the receptionist was dismissive when I asked.
+5 - Quick visit, fair price, staff remembered my name.
+3 - Hygienist was rushed. Took forever to get an appointment.
+5 - Thorough, knowledgeable, and on time. Highly recommend.`;
+    const esc = (t) => String(t ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c]);
+    document.getElementById("sample").onclick = () => { document.getElementById("rv").value = SAMPLE; run(); };
+    document.getElementById("go").onclick = run;
+    async function run() {
+      const out = document.getElementById("out");
+      out.innerHTML = "<p class='muted'>Reading…</p>";
+      const res = await fetch("/api/public/insights", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({text: document.getElementById("rv").value})});
+      const d = await res.json();
+      if (!res.ok) { out.innerHTML = `<p class="muted">${esc(d.detail || "Could not analyze")}</p>`; return; }
+      const find = (k) => d.aspects.find((a) => a.aspect === k);
+      const fix = d.fix_first && find(d.fix_first), keep = d.keep_doing && find(d.keep_doing);
+      const max = Math.max(...d.aspects.map((a) => a.mentions), 1);
+      out.innerHTML = `
+        <p class="muted">${d.with_text} reviews · ${d.sentiment.positive} positive · ${d.sentiment.neutral} neutral · ${d.sentiment.negative} negative</p>
+        <div class="row3">
+          ${fix ? `<div class="box bad"><small>Fix first</small><b>${esc(fix.label)}</b>${fix.negative} complaint(s)${fix.complaints[0] ? `<q>${esc(fix.complaints[0])}</q>` : ""}</div>` : ""}
+          ${keep ? `<div class="box ok"><small>Keep doing</small><b>${esc(keep.label)}</b>${keep.positive} compliment(s)${keep.praise[0] ? `<q>${esc(keep.praise[0])}</q>` : ""}</div>` : ""}
+        </div>
+        ${d.aspects.map((a) => `<div class="ln"><span>${esc(a.label)}</span><div class="bar" style="width:${Math.max(8, a.mentions / max * 100)}%"><i style="flex:${a.positive};background:#12b76a"></i><i style="flex:${a.neutral};background:#98a2b3"></i><i style="flex:${a.negative};background:#f04438"></i></div><span class="muted">${a.mentions}</span></div>`).join("")}
+        ${d.mismatches && d.mismatches.length ? `<p class="muted">⚠ ${d.mismatches.length} review(s) gave a high rating but used unhappy words — those customers are one bad day from leaving.</p>` : ""}
+        <p style="margin-top:16px"><a class="btn-white" href="/app">Get this on autopilot for every new review →</a></p>
+        <p class="muted" style="font-size:12px;margin-top:10px">Sentiment by VADER (open source, MIT) + Starling’s local-business theme lexicon. Nothing you paste is stored.</p>`;
+    }
+  </script>
+
+  <footer class="foot">
+    <div>
+      <a class="brand" href="/"><svg viewBox="0 0 32 32" fill="none" width="28"><path d="M4 18c8-1 12-8 14-14 1 6 5 11 12 13-7 1-11 5-12 13-2-7-7-11-14-12Z" fill="#fff"/></svg> Starling</a>
+      <p>Reviews, messaging, and listings for local businesses.</p>
+    </div>
+    <div class="foot-cols">
+      <div><a href="/products">Products</a><a href="/solutions">Solutions</a><a href="/industries">Industries</a></div>
+      <div><a href="/customers">Customers</a><a href="/resources">Resources</a><a href="/pricing">Pricing</a></div>
+      <div><a href="/demo">Get a Demo</a><a href="/app">Sign in</a></div>
+      <div><a href="/app">Create account</a></div>
+    </div>
+  </footer>
+  <script src="/static/site.js"></script>
+</body>
+</html>

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import secrets
 import time
 from pathlib import Path
@@ -11,7 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app import deliver, grok, places
+from app import deliver, grok, insights, places
 from app.db import PLANS, SMS_COST, check_pw, connect, create_location, hash_pw, init, row, rows, slugify
 
 load_dotenv()
@@ -282,6 +283,11 @@ def form_page(slug: str):
     return FileResponse(STATIC / "form.html")
 
 
+@app.get("/review-analyzer")
+def review_analyzer_page():
+    return _page("analyzer")
+
+
 @app.get("/api/health")
 def health():
     return {
@@ -542,6 +548,57 @@ def list_reviews(request: Request):
     )
     con.close()
     return {"reviews": data}
+
+
+@app.get("/api/insights")
+def review_insights(request: Request):
+    """Aspect-based sentiment over every review for the location (public + private)."""
+    u = require(request)
+    lid = loc_id(u, request)
+    con = connect()
+    data = rows(
+        con.execute(
+            "SELECT id, rating, text, public, created_at FROM reviews WHERE location_id = ? ORDER BY created_at DESC LIMIT 2000",
+            (lid,),
+        )
+    )
+    con.close()
+    return insights.summarize(data)
+
+
+class PublicInsightsIn(BaseModel):
+    reviews: list[dict] = Field(default_factory=list)
+    text: str = ""
+
+
+@app.post("/api/public/insights")
+def public_insights(body: PublicInsightsIn):
+    """Free review analyzer (marketing tool): paste reviews, get themes. No login, no AI cost."""
+    items: list[dict] = []
+    for r in body.reviews[:200]:
+        text = str((r or {}).get("text") or "")[:2000]
+        rating = (r or {}).get("rating")
+        try:
+            rating = float(rating) if rating not in (None, "") else None
+        except (TypeError, ValueError):
+            rating = None
+        if text.strip():
+            items.append({"text": text, "rating": rating})
+    if not items and body.text.strip():
+        for line in body.text[:60000].splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            rating = None
+            m = re.match(r"^\s*([1-5])\s*(?:\*|★|stars?)?\s*[-:|,]\s*(.+)$", line)
+            if m:
+                rating, line = float(m.group(1)), m.group(2)
+            items.append({"text": line[:2000], "rating": rating})
+            if len(items) >= 200:
+                break
+    if not items:
+        raise HTTPException(400, "paste at least one review")
+    return insights.summarize(items)
 
 
 @app.post("/api/review-requests")

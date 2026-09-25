@@ -94,3 +94,21 @@ label{display:block;font-size:12px;color:var(--muted);margin:0 0 4px}
   .side .logo,.side .sp,#logout,#more-toggle,#more-nav{display:none}
   .side .navb.core{flex:1;text-align:center}
 }
+
+/* Review insights */
+.ins-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin:10px 0}
+.ins-call{border-radius:12px;padding:10px 12px;border:1px solid var(--line);display:flex;flex-direction:column;gap:2px}
+.ins-call.bad{background:#fef3f2;border-color:#fecdca}
+.ins-call.ok{background:#ecfdf3;border-color:#abefc6}
+.ins-call small{text-transform:uppercase;letter-spacing:.08em;font-size:10px;color:var(--muted);font-weight:700}
+.ins-call b{font-size:16px}
+.ins-call span{font-size:12px;color:var(--muted)}
+.ins-call q{font-size:13px;color:#344054;margin-top:4px}
+.ins-bars{display:flex;flex-direction:column;gap:6px;margin-top:6px}
+.ins-row{display:grid;grid-template-columns:150px 1fr 28px;align-items:center;gap:8px;font-size:13px}
+.ins-row small{color:var(--muted);text-align:right}
+.ins-bar{display:flex;height:10px;border-radius:999px;overflow:hidden;background:#f2f4f7}
+.ins-bar i{display:block;min-width:0}
+.ins-bar i.p{background:#12b76a}.ins-bar i.n{background:#d0d5dd}.ins-bar i.x{background:#f04438}
+.pills-lite{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.pills-lite span{background:#f2f4f7;border-radius:999px;padding:3px 9px;font-size:12px;color:#344054}

@@ -142,3 +142,37 @@ if __name__ == "__main__":
                 failed += 1
                 print("FAIL", name, type(e).__name__, e)
     raise SystemExit(failed)
+
+
+def test_public_insights_themes():
+    r = c.post(
+        "/api/public/insights",
+        json={"text": "5 - Dr. Patel was gentle and the front desk was friendly\n2 - Waited over an hour and nobody called back\n1 - Charged me twice, receptionist was rude"},
+    )
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["with_text"] == 3
+    labels = {a["aspect"] for a in d["aspects"]}
+    assert {"staff", "wait", "price"} <= labels
+    assert d["fix_first"] in {"staff", "wait", "price", "communication"}
+    assert c.post("/api/public/insights", json={"text": "  "}).status_code == 400
+
+
+def test_dashboard_insights_requires_login_and_reads_reviews():
+    fresh = TestClient(app)
+    assert fresh.get("/api/insights").status_code == 401
+    user = signup()
+    from app.db import connect as _connect
+    con = _connect()
+    con.execute(
+        "INSERT INTO reviews (location_id, source, rating, text, public, created_at) VALUES (?,?,?,?,?,?)",
+        (user["location_id"], "starling", 5, "Great work but they charged me twice.", 1, 1.0),
+    )
+    con.commit()
+    con.close()
+    r = c.get("/api/insights")
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["reviews"] == 1
+    assert d["mismatches"] and d["mismatches"][0]["rating"] == 5
+    assert c.get("/review-analyzer").status_code == 200
