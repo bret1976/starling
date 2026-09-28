@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app import deliver, grok, insights, places
+from app import deliver, grok, insights, local_replies, places
 from app.db import PLANS, SMS_COST, check_pw, connect, create_location, hash_pw, init, row, rows, slugify
 
 load_dotenv()
@@ -297,6 +297,7 @@ def health():
         "model": grok.MODEL,
         "delivery": deliver.status(),
         "public_url": deliver.public_url(),
+        "local_reply": local_replies.PACK,
     }
 
 
@@ -571,6 +572,14 @@ class PublicInsightsIn(BaseModel):
     text: str = ""
 
 
+class PublicLocalReplyIn(BaseModel):
+    business: str = "Your business"
+    industry: str = "local business"
+    rating: int = Field(default=5, ge=1, le=5)
+    text: str = ""
+    customer: str = ""
+
+
 @app.post("/api/public/insights")
 def public_insights(body: PublicInsightsIn):
     """Free review analyzer (marketing tool): paste reviews, get themes. No login, no AI cost."""
@@ -599,6 +608,15 @@ def public_insights(body: PublicInsightsIn):
     if not items:
         raise HTTPException(400, "paste at least one review")
     return insights.summarize(items)
+
+
+@app.post("/api/public/local-reply")
+def public_local_reply(body: PublicLocalReplyIn):
+    """Lead-magnet: draft a brand-safe review reply instantly, no signup, nothing stored."""
+    draft = local_replies.draft_review_reply(
+        body.business, body.industry, body.rating, body.text or "", body.customer or None
+    )
+    return {"ok": True, **draft}
 
 
 @app.post("/api/review-requests")
@@ -793,17 +811,94 @@ async def ai_reply_review(rid: int, request: Request):
     loc = location(lid)
     gated(loc, "reviews")
     con = connect()
-    r = row(con.execute("SELECT * FROM reviews WHERE id = ? AND location_id = ?", (rid, lid)).fetchone())
+    r = row(
+        con.execute(
+            """SELECT r.*, c.name AS customer_name FROM reviews r
+               LEFT JOIN customers c ON c.id = r.customer_id
+               WHERE r.id = ? AND r.location_id = ?""",
+            (rid, lid),
+        ).fetchone()
+    )
     con.close()
     if not r:
         raise HTTPException(404, "review missing")
-    text = await grok.review_reply(loc["name"], loc["industry"], r["rating"], r["text"] or "")
-    meter(lid, "ai", 1)
+    source = "grok"
+    metered = False
+    try:
+        text = await grok.review_reply(loc["name"], loc["industry"], r["rating"], r["text"] or "")
+        meter(lid, "ai", 1)
+        metered = True
+    except Exception:
+        draft = local_replies.draft_review_reply(
+            loc["name"], loc["industry"], int(r["rating"] or 3), r["text"] or "", r.get("customer_name")
+        )
+        text = draft["text"]
+        source = draft["source"]
     con = connect()
     con.execute("UPDATE reviews SET reply_draft = ? WHERE id = ?", (text, rid))
     con.commit()
     con.close()
-    return {"ok": True, "text": text}
+    return {"ok": True, "text": text, "source": source, "metered": metered}
+
+
+@app.post("/api/reviews/{rid}/local-reply")
+def local_reply_review(rid: int, request: Request):
+    """Instant free reply draft — no AI credits, no network."""
+    u = require(request)
+    lid = loc_id(u, request)
+    loc = location(lid)
+    gated(loc, "reviews")
+    con = connect()
+    r = row(
+        con.execute(
+            """SELECT r.*, c.name AS customer_name FROM reviews r
+               LEFT JOIN customers c ON c.id = r.customer_id
+               WHERE r.id = ? AND r.location_id = ?""",
+            (rid, lid),
+        ).fetchone()
+    )
+    con.close()
+    if not r:
+        raise HTTPException(404, "review missing")
+    draft = local_replies.draft_review_reply(
+        loc["name"], loc["industry"], int(r["rating"] or 3), r["text"] or "", r.get("customer_name")
+    )
+    con = connect()
+    con.execute("UPDATE reviews SET reply_draft = ? WHERE id = ?", (draft["text"], rid))
+    con.commit()
+    con.close()
+    return {"ok": True, **draft}
+
+
+@app.post("/api/reviews/{rid}/send-local")
+def send_local_review(rid: int, request: Request):
+    """Generate an instant local reply and save it as the public reply (no AI meter)."""
+    u = require(request)
+    lid = loc_id(u, request)
+    loc = location(lid)
+    gated(loc, "reviews")
+    con = connect()
+    r = row(
+        con.execute(
+            """SELECT r.*, c.name AS customer_name FROM reviews r
+               LEFT JOIN customers c ON c.id = r.customer_id
+               WHERE r.id = ? AND r.location_id = ?""",
+            (rid, lid),
+        ).fetchone()
+    )
+    if not r:
+        con.close()
+        raise HTTPException(404, "review missing")
+    con.close()
+    draft = local_replies.draft_review_reply(
+        loc["name"], loc["industry"], int(r["rating"] or 3), r["text"] or "", r.get("customer_name")
+    )
+    text = draft["text"]
+    con = connect()
+    con.execute("UPDATE reviews SET reply = ?, reply_draft = ? WHERE id = ?", (text, text, rid))
+    con.commit()
+    con.close()
+    return {"ok": True, "text": text, "source": draft["source"], "metered": False, "band": draft["band"], "aspects": draft["aspects"]}
 
 
 @app.post("/api/reviews/{rid}/send-ai")
@@ -813,20 +908,38 @@ async def send_ai_review(rid: int, request: Request):
     loc = location(lid)
     gated(loc, "reviews")
     con = connect()
-    r = row(con.execute("SELECT * FROM reviews WHERE id = ? AND location_id = ?", (rid, lid)).fetchone())
+    r = row(
+        con.execute(
+            """SELECT r.*, c.name AS customer_name FROM reviews r
+               LEFT JOIN customers c ON c.id = r.customer_id
+               WHERE r.id = ? AND r.location_id = ?""",
+            (rid, lid),
+        ).fetchone()
+    )
     if not r:
         con.close()
         raise HTTPException(404, "review missing")
     text = (r.get("reply_draft") or "").strip()
     con.close()
+    source = "draft"
+    metered = False
     if not text:
-        text = await grok.review_reply(loc["name"], loc["industry"], r["rating"], r["text"] or "")
-        meter(lid, "ai", 1)
+        try:
+            text = await grok.review_reply(loc["name"], loc["industry"], r["rating"], r["text"] or "")
+            meter(lid, "ai", 1)
+            metered = True
+            source = "grok"
+        except Exception:
+            draft = local_replies.draft_review_reply(
+                loc["name"], loc["industry"], int(r["rating"] or 3), r["text"] or "", r.get("customer_name")
+            )
+            text = draft["text"]
+            source = draft["source"]
     con = connect()
     con.execute("UPDATE reviews SET reply = ?, reply_draft = ? WHERE id = ?", (text, text, rid))
     con.commit()
     con.close()
-    return {"ok": True, "text": text}
+    return {"ok": True, "text": text, "source": source, "metered": metered}
 
 
 @app.get("/api/inbox")
@@ -908,9 +1021,18 @@ async def inbox_ai(tid: int, request: Request):
     con.close()
     if not t:
         raise HTTPException(404, "thread missing")
-    text = await grok.inbox_reply(loc["name"], t["channel"], (last or {}).get("body") or "")
-    meter(lid, "ai", 1)
-    return {"ok": True, "text": text}
+    incoming = (last or {}).get("body") or ""
+    source = "grok"
+    metered = False
+    try:
+        text = await grok.inbox_reply(loc["name"], t["channel"], incoming)
+        meter(lid, "ai", 1)
+        metered = True
+    except Exception:
+        draft = local_replies.draft_inbox_reply(loc["name"], t["channel"], incoming)
+        text = draft["text"]
+        source = draft["source"]
+    return {"ok": True, "text": text, "source": source, "metered": metered}
 
 
 @app.post("/api/widget/chat")

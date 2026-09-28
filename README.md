@@ -23,3 +23,16 @@ Live: https://starling-production-5190.up.railway.app
 - Public lead magnet: **/review-analyzer** — paste reviews, get the same report. `POST /api/public/insights`.
 - Runs in-process with no AI credits: sentence sentiment by [VADER](https://github.com/cjhutto/vaderSentiment)
   (MIT) plus Starling's own aspect lexicon and complaint patterns (`app/insights.py`).
+
+## Instant Local Reply Pack (free, local)
+
+- Dashboard **Home → Needs a reply → Instant reply**: brand-safe public reply drafted in-process from
+  rating + review text + industry. **No AI credits**, no network. `POST /api/reviews/{id}/send-local`
+  (also `/local-reply` for draft-only). Grok AI reply still available; if Grok fails, Starling falls
+  back to this pack automatically.
+- Public lead magnet on **/review-analyzer**: **Draft reply** uses `POST /api/public/local-reply`.
+- Health flag: `local_reply: instant-pack-v1`.
+- Original Starling templates in `app/local_replies.py`. Aspect cues reuse Review Insights
+  (VADER MIT). Idea inspiration for a free local path without an LLM key:
+  [haqaliz/rereflect](https://github.com/haqaliz/rereflect) (MIT) — no code copied.
+

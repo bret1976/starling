@@ -65,6 +65,41 @@
     const esc = (t) => String(t ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c]);
     document.getElementById("sample").onclick = () => { document.getElementById("rv").value = SAMPLE; run(); };
     document.getElementById("go").onclick = run;
+    function wireReply() {
+      const btn = document.getElementById("draft-reply");
+      if (!btn || btn.dataset.wired) return;
+      btn.dataset.wired = "1";
+      btn.onclick = async () => {
+        const raw = document.getElementById("rv").value.trim().split(/\n+/).map((l) => l.trim()).filter(Boolean);
+        // Prefer a low-star line if present, else first line.
+        let pick = raw[0] || "3 - Please follow up";
+        for (const line of raw) {
+          const m = line.match(/^(\d)\s*[-–—:]\s*(.*)$/);
+          if (m && Number(m[1]) <= 2) { pick = line; break; }
+        }
+        const m = pick.match(/^(\d)\s*[-–—:]\s*(.*)$/);
+        const rating = m ? Number(m[1]) : 3;
+        const text = m ? m[2] : pick;
+        btn.disabled = true; btn.textContent = "Drafting…";
+        try {
+          const res = await fetch("/api/public/local-reply", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({business: "Northside Dental", industry: "dental", rating, text, customer: "Jordan"}),
+          });
+          const d = await res.json();
+          if (!res.ok) throw new Error(d.detail || "Could not draft");
+          const out = document.getElementById("reply-out");
+          out.style.display = "block";
+          out.textContent = d.text;
+          document.getElementById("reply-meta").textContent = `${d.source} · ${d.band}` + (d.aspects && d.aspects.length ? ` · ${d.aspects.join(", ")}` : "");
+        } catch (e) {
+          document.getElementById("reply-meta").textContent = e.message || "failed";
+        } finally {
+          btn.disabled = false; btn.textContent = "Draft reply →";
+        }
+      };
+    }
     async function run() {
       const out = document.getElementById("out");
       out.innerHTML = "<p class='muted'>Reading…</p>";
@@ -82,8 +117,19 @@
         </div>
         ${d.aspects.map((a) => `<div class="ln"><span>${esc(a.label)}</span><div class="bar" style="width:${Math.max(8, a.mentions / max * 100)}%"><i style="flex:${a.positive};background:#12b76a"></i><i style="flex:${a.neutral};background:#98a2b3"></i><i style="flex:${a.negative};background:#f04438"></i></div><span class="muted">${a.mentions}</span></div>`).join("")}
         ${d.mismatches && d.mismatches.length ? `<p class="muted">⚠ ${d.mismatches.length} review(s) gave a high rating but used unhappy words — those customers are one bad day from leaving.</p>` : ""}
+        <div class="box" id="reply-box" style="margin-top:16px">
+          <small>Instant local reply</small>
+          <b style="font-size:15px;margin:6px 0">Draft a free reply to your toughest review</b>
+          <p class="muted" style="font-size:13px;margin:0 0 10px">No AI credits. Brand-safe templates that mention the same themes Starling just found.</p>
+          <p style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:0">
+            <button class="btn-blue" id="draft-reply" type="button" style="width:auto;padding:10px 18px;font-size:13px">Draft reply →</button>
+            <span class="muted" id="reply-meta" style="font-size:12px"></span>
+          </p>
+          <pre id="reply-out" style="display:none;white-space:pre-wrap;margin-top:12px;padding:12px;border-radius:10px;background:rgba(0,0,0,.25);font:14px/1.45 Inter,system-ui,sans-serif"></pre>
+        </div>
         <p style="margin-top:16px"><a class="btn-white" href="/app">Get this on autopilot for every new review →</a></p>
-        <p class="muted" style="font-size:12px;margin-top:10px">Sentiment by VADER (open source, MIT) + Starling’s local-business theme lexicon. Nothing you paste is stored.</p>`;
+        <p class="muted" style="font-size:12px;margin-top:10px">Sentiment by VADER (open source, MIT) + Starling’s local-business theme lexicon. Instant replies are Starling’s own template pack (no LLM). Nothing you paste is stored.</p>`;
+      wireReply();
     }
   </script>
 

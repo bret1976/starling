@@ -130,20 +130,6 @@ def test_plan_gate_social():
     c.post("/api/location/plan", json={"plan": "growth"})
     assert c.get("/api/social").status_code == 200
 
-
-if __name__ == "__main__":
-    failed = 0
-    for name, fn in list(globals().items()):
-        if name.startswith("test_") and callable(fn):
-            try:
-                fn()
-                print("ok", name)
-            except Exception as e:
-                failed += 1
-                print("FAIL", name, type(e).__name__, e)
-    raise SystemExit(failed)
-
-
 def test_public_insights_themes():
     r = c.post(
         "/api/public/insights",
@@ -176,3 +162,87 @@ def test_dashboard_insights_requires_login_and_reads_reviews():
     assert d["reviews"] == 1
     assert d["mismatches"] and d["mismatches"][0]["rating"] == 5
     assert c.get("/review-analyzer").status_code == 200
+
+
+def test_health_local_reply_pack():
+    d = c.get("/api/health").json()
+    assert d["local_reply"] == "instant-pack-v1"
+
+
+def test_public_local_reply_praise_and_recovery():
+    praise = c.post(
+        "/api/public/local-reply",
+        json={
+            "business": "Northside Dental",
+            "industry": "dental",
+            "rating": 5,
+            "text": "Dr. Patel was gentle and the front desk was so friendly!",
+            "customer": "Jordan Hale",
+        },
+    )
+    assert praise.status_code == 200, praise.text
+    p = praise.json()
+    assert p["ok"] is True
+    assert p["source"] == "instant-pack-v1"
+    assert p["band"] == "praise"
+    assert p["metered"] is False
+    assert "Jordan" in p["text"]
+    assert "Northside Dental" in p["text"]
+    assert "staff" in p["aspects"]
+
+    bad = c.post(
+        "/api/public/local-reply",
+        json={
+            "business": "Northside Dental",
+            "industry": "dental",
+            "rating": 1,
+            "text": "Waited over an hour and nobody called back about billing.",
+            "customer": "Sam",
+        },
+    )
+    assert bad.status_code == 200, bad.text
+    b = bad.json()
+    assert b["band"] == "recovery"
+    assert b["metered"] is False
+    assert "Sam" in b["text"]
+    assert set(b["aspects"]) & {"wait", "communication", "price"}
+
+
+def test_send_local_saves_reply_without_ai_meter():
+    user = signup()
+    from app.db import connect as _connect
+
+    con = _connect()
+    cid = con.execute(
+        "INSERT INTO customers (location_id, name, phone, email) VALUES (?,?,?,?)",
+        (user["location_id"], "Alex Kim", "", "alex@example.com"),
+    ).lastrowid
+    rid = con.execute(
+        "INSERT INTO reviews (location_id, customer_id, source, rating, text, public, created_at) VALUES (?,?,?,?,?,?,?)",
+        (user["location_id"], cid, "starling", 2, "Waited forever and the receptionist was rude.", 1, 1.0),
+    ).lastrowid
+    con.commit()
+    con.close()
+    r = c.post(f"/api/reviews/{rid}/send-local")
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["source"] == "instant-pack-v1"
+    assert d["metered"] is False
+    # local-reply SELECT * FROM reviews has no customer_name join; guest fallback is fine,
+    # but business name must appear and reply must persist.
+    assert "Alex" in d["text"] and "Test Dental" in d["text"]
+    reviews = c.get("/api/reviews").json()["reviews"]
+    saved = next(x for x in reviews if x["id"] == rid)
+    assert saved["reply"] == d["text"]
+
+if __name__ == "__main__":
+    failed = 0
+    for name, fn in list(globals().items()):
+        if name.startswith("test_") and callable(fn):
+            try:
+                fn()
+                print("ok", name)
+            except Exception as e:
+                failed += 1
+                print("FAIL", name, type(e).__name__, e)
+    raise SystemExit(failed)

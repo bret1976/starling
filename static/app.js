@@ -133,7 +133,7 @@ async function home() {
     <div class="how">
       <div><b>1. Ask</b><span>Send a link after they visit.</span></div>
       <div><b>2. They rate</b><span>4–5★ go public. 1–3★ stay private.</span></div>
-      <div><b>3. You tap send</b><span>Starling writes the reply.</span></div>
+      <div><b>3. You tap Instant or AI</b><span>Free local draft, or Grok when you want it.</span></div>
     </div>
 
     <div class="card ask">
@@ -181,7 +181,10 @@ async function home() {
                     ${r.public ? "" : "<span class='badge warn'>private</span>"}</div>
                   <p>${r.text || "<span class='muted'>No comment</span>"}</p>
                   ${r.public
-                    ? `<button class="btn primary" data-sendai="${r.id}">Send AI reply</button>`
+                    ? `<div style="display:flex;gap:8px;flex-wrap:wrap">
+                        <button class="btn primary" data-sendlocal="${r.id}">Instant reply</button>
+                        <button class="btn ghost" data-sendai="${r.id}">AI reply</button>
+                      </div>`
                     : `<button class="btn ghost" data-inbox="1">Open inbox</button>`}
                 </div>`
               )
@@ -220,17 +223,33 @@ async function home() {
   document.querySelectorAll("[data-copy]").forEach((b) => {
     b.onclick = () => copy(b.dataset.copy);
   });
+  document.querySelectorAll("[data-sendlocal]").forEach((b) => {
+    b.onclick = async () => {
+      b.disabled = true;
+      const prev = b.textContent;
+      b.textContent = "Writing…";
+      try {
+        const r = await api(`/api/reviews/${b.dataset.sendlocal}/send-local`, { method: "POST" });
+        toast(r.source === "instant-pack-v1" ? "Instant reply saved (free)" : "Reply saved");
+        home();
+      } catch (e) {
+        b.disabled = false;
+        b.textContent = prev;
+        toast(e.message);
+      }
+    };
+  });
   document.querySelectorAll("[data-sendai]").forEach((b) => {
     b.onclick = async () => {
       b.disabled = true;
       b.textContent = "Writing…";
       try {
         await api(`/api/reviews/${b.dataset.sendai}/send-ai`, { method: "POST" });
-        toast("Reply saved");
+        toast("AI reply saved");
         home();
       } catch (e) {
         b.disabled = false;
-        b.textContent = "Send AI reply";
+        b.textContent = "AI reply";
         toast(e.message);
       }
     };
