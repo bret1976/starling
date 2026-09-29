@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app import deliver, grok, insights, local_replies, places
+from app import deliver, grok, insights, local_replies, nap_diff, places
 from app.db import PLANS, SMS_COST, check_pw, connect, create_location, hash_pw, init, row, rows, slugify
 
 load_dotenv()
@@ -212,6 +212,35 @@ class PublicReviewIn(BaseModel):
     text: str = ""
 
 
+class PublicNapDiffIn(BaseModel):
+    """Canonical vs observed NAP for a free consistency grade (no signup)."""
+    name: str = ""
+    address: str = ""
+    phone: str = ""
+    city: str = ""
+    state: str = ""
+    zip: str = ""
+    observed_name: str = ""
+    observed_address: str = ""
+    observed_phone: str = ""
+    observed_city: str = ""
+    observed_state: str = ""
+    observed_zip: str = ""
+    fields: str = "name,address,phone"
+
+
+class ListingNapDiffIn(BaseModel):
+    """Score an observed directory listing against the signed-in location NAP."""
+    observed_name: str = ""
+    observed_address: str = ""
+    observed_phone: str = ""
+    observed_city: str = ""
+    observed_state: str = ""
+    observed_zip: str = ""
+    directory: str = ""
+    fields: str = "name,address,phone"
+
+
 class ListingDescIn(BaseModel):
     pass
 
@@ -298,6 +327,7 @@ def health():
         "delivery": deliver.status(),
         "public_url": deliver.public_url(),
         "local_reply": local_replies.PACK,
+        "nap_diff": nap_diff.PACK,
     }
 
 
@@ -1077,7 +1107,16 @@ def listings(request: Request):
     data = rows(con.execute("SELECT * FROM listings WHERE location_id = ? ORDER BY directory", (lid,)))
     con.close()
     loc = location(lid)
-    return {"listings": data, "nap": {k: loc[k] for k in ("name", "phone", "address", "city", "state", "zip")}}
+    enriched = []
+    for row in data:
+        item = dict(row)
+        item["nap_diff"] = nap_diff.parse_detail(row.get("detail"))
+        enriched.append(item)
+    return {
+        "listings": enriched,
+        "nap": {k: loc[k] for k in ("name", "phone", "address", "city", "state", "zip")},
+        "nap_diff": nap_diff.summarize(data),
+    }
 
 
 @app.post("/api/listings/sync")
@@ -1106,22 +1145,168 @@ def listings_sync(request: Request):
                 (lid, directory, status, nap, now, url, detail),
             )
 
-    osm_status = "found" if scan.get("found") else "not_found"
-    upsert("OpenStreetMap", osm_status, 1 if scan.get("found") else 0, None, scan.get("label"))
+    canonical = {
+        "name": loc.get("name") or "",
+        "address": nap_diff.build_address_line(loc),
+        "phone": loc.get("phone") or "",
+    }
+
+    if scan.get("found"):
+        comps = scan.get("components") or {}
+        observed = {
+            "name": comps.get("name") or (loc.get("name") or ""),
+            "address": nap_diff.build_address_line(
+                {
+                    "address": comps.get("address") or "",
+                    "city": comps.get("city") or "",
+                    "state": comps.get("state") or "",
+                    "zip": comps.get("zip") or "",
+                }
+            )
+            or (scan.get("label") or ""),
+            "phone": "",
+        }
+        # OSM rarely exposes phone — grade name+address only.
+        grade = nap_diff.grade_nap(canonical, observed, fields=("name", "address"))
+        osm_status = "found"
+        osm_detail = nap_diff.detail_payload(grade, label=scan.get("label"), extra={"source": "openstreetmap"})
+        upsert("OpenStreetMap", osm_status, grade["nap_match"], None, osm_detail)
+        scan["nap_diff"] = grade
+    else:
+        missing_grade = {
+            "pack": nap_diff.PACK,
+            "overall": "incomplete",
+            "nap_match": 0,
+            "fields": {},
+            "fix_hint": "No OpenStreetMap hit for this NAP — add or correct the address.",
+        }
+        osm_detail = nap_diff.detail_payload(missing_grade, label=None, extra={"source": "openstreetmap"})
+        upsert("OpenStreetMap", "not_found", 0, None, osm_detail)
+        scan["nap_diff"] = missing_grade
+
     if loc.get("place_id"):
+        # Connected Place ID: treat as match for name (directory linked); phone/address not scraped.
+        g_grade = nap_diff.grade_nap(
+            canonical,
+            {"name": loc.get("name") or "", "address": canonical["address"], "phone": canonical["phone"]},
+            fields=("name", "address", "phone"),
+        )
+        g_detail = nap_diff.detail_payload(
+            g_grade,
+            label=loc["place_id"],
+            extra={"source": "google", "place_id": loc["place_id"], "note": "Place ID linked — live GBP scrape not enabled"},
+        )
         upsert(
             "Google Business",
             "connected",
-            1,
+            g_grade["nap_match"],
             places.google_review_url(loc["place_id"], loc.get("google_url")),
-            loc["place_id"],
+            g_detail,
         )
     else:
-        upsert("Google Business", "needs_place_id", 0, loc.get("google_url"), "Add a Google Place ID in Settings")
+        incomplete = {
+            "pack": nap_diff.PACK,
+            "overall": "incomplete",
+            "nap_match": 0,
+            "fields": {
+                "name": {"canonical": canonical["name"], "observed": "", "status": "missing"},
+                "address": {"canonical": canonical["address"], "observed": "", "status": "missing"},
+                "phone": {"canonical": canonical["phone"], "observed": "", "status": "missing"},
+            },
+            "fix_hint": "Add a Google Place ID in Settings so Starling can mark Google Business as connected.",
+        }
+        upsert(
+            "Google Business",
+            "needs_place_id",
+            0,
+            loc.get("google_url"),
+            nap_diff.detail_payload(incomplete, extra={"source": "google"}),
+        )
     con.commit()
     data = rows(con.execute("SELECT * FROM listings WHERE location_id = ? ORDER BY directory", (lid,)))
     con.close()
-    return {"ok": True, "listings": data, "scan": scan}
+    enriched = []
+    for row in data:
+        item = dict(row)
+        item["nap_diff"] = nap_diff.parse_detail(row.get("detail"))
+        enriched.append(item)
+    return {
+        "ok": True,
+        "listings": enriched,
+        "scan": scan,
+        "nap_diff": nap_diff.summarize(data),
+    }
+
+
+@app.post("/api/listings/nap-diff")
+def listings_nap_diff(request: Request, body: ListingNapDiffIn):
+    """Grade an observed directory NAP against the signed-in location (no network)."""
+    u = require(request)
+    lid = loc_id(u, request)
+    loc = location(lid)
+    gated(loc, "listings")
+    field_keys = tuple(k.strip() for k in (body.fields or "name,address,phone").split(",") if k.strip())
+    if not field_keys:
+        field_keys = ("name", "address", "phone")
+    canonical = {
+        "name": loc.get("name") or "",
+        "address": nap_diff.build_address_line(loc),
+        "phone": loc.get("phone") or "",
+    }
+    observed = {
+        "name": body.observed_name,
+        "address": nap_diff.build_address_line(
+            {
+                "address": body.observed_address,
+                "city": body.observed_city,
+                "state": body.observed_state,
+                "zip": body.observed_zip,
+            }
+        )
+        or body.observed_address,
+        "phone": body.observed_phone,
+    }
+    grade = nap_diff.grade_nap(canonical, observed, fields=field_keys)
+    return {
+        "ok": True,
+        "directory": body.directory or None,
+        "canonical": canonical,
+        "observed": observed,
+        **grade,
+    }
+
+
+@app.post("/api/public/nap-diff")
+def public_nap_diff(body: PublicNapDiffIn):
+    """Lead-magnet: grade canonical vs observed NAP instantly, nothing stored."""
+    field_keys = tuple(k.strip() for k in (body.fields or "name,address,phone").split(",") if k.strip())
+    if not field_keys:
+        field_keys = ("name", "address", "phone")
+    if not any([(body.name or "").strip(), (body.address or "").strip(), (body.phone or "").strip()]):
+        raise HTTPException(400, "canonical name, address, or phone required")
+    canonical = {
+        "name": body.name,
+        "address": nap_diff.build_address_line(
+            {"address": body.address, "city": body.city, "state": body.state, "zip": body.zip}
+        )
+        or body.address,
+        "phone": body.phone,
+    }
+    observed = {
+        "name": body.observed_name,
+        "address": nap_diff.build_address_line(
+            {
+                "address": body.observed_address,
+                "city": body.observed_city,
+                "state": body.observed_state,
+                "zip": body.observed_zip,
+            }
+        )
+        or body.observed_address,
+        "phone": body.observed_phone,
+    }
+    grade = nap_diff.grade_nap(canonical, observed, fields=field_keys)
+    return {"ok": True, "canonical": canonical, "observed": observed, **grade}
 
 
 @app.post("/api/listings/ai-description")

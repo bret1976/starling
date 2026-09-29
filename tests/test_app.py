@@ -246,3 +246,95 @@ if __name__ == "__main__":
                 failed += 1
                 print("FAIL", name, type(e).__name__, e)
     raise SystemExit(failed)
+
+
+def test_health_nap_diff_pack():
+    d = c.get("/api/health").json()
+    assert d["nap_diff"] == "nap-diff-v1"
+    assert d["local_reply"] == "instant-pack-v1"
+
+
+def test_public_nap_diff_formatting_vs_mismatch():
+    # Same phone, different formatting → formatting overall when other fields match
+    fmt = c.post(
+        "/api/public/nap-diff",
+        json={
+            "name": "Northside Dental",
+            "address": "123 Main Street",
+            "city": "Austin",
+            "state": "TX",
+            "zip": "78701",
+            "phone": "(512) 555-0100",
+            "observed_name": "Northside Dental",
+            "observed_address": "123 Main St",
+            "observed_city": "Austin",
+            "observed_state": "TX",
+            "observed_zip": "78701",
+            "observed_phone": "512-555-0100",
+        },
+    )
+    assert fmt.status_code == 200, fmt.text
+    f = fmt.json()
+    assert f["ok"] is True
+    assert f["pack"] == "nap-diff-v1"
+    assert f["overall"] == "formatting"
+    assert f["nap_match"] == 1
+    assert f["fields"]["phone"]["status"] == "formatting"
+    assert f["fields"]["address"]["status"] == "formatting"
+
+    bad = c.post(
+        "/api/public/nap-diff",
+        json={
+            "name": "Northside Dental",
+            "address": "123 Main Street, Austin, TX 78701",
+            "phone": "5125550100",
+            "observed_name": "Northside Dental",
+            "observed_address": "456 Oak Avenue, Austin, TX 78701",
+            "observed_phone": "5125550199",
+        },
+    )
+    assert bad.status_code == 200, bad.text
+    b = bad.json()
+    assert b["overall"] == "mismatch"
+    assert b["nap_match"] == 0
+    assert b["fields"]["address"]["status"] == "mismatch"
+    assert b["fields"]["phone"]["status"] == "mismatch"
+    assert "mismatch" in (b.get("fix_hint") or "").lower() or "Real mismatch" in (b.get("fix_hint") or "")
+
+    assert c.post("/api/public/nap-diff", json={}).status_code == 400
+
+
+def test_listings_nap_diff_requires_login_and_grades():
+    fresh = TestClient(app)
+    assert fresh.post("/api/listings/nap-diff", json={"observed_name": "X"}).status_code == 401
+    signup()
+    # set phone + address for a real compare
+    c.patch(
+        "/api/location",
+        json={
+            "name": "Test Dental",
+            "address": "1100 Congress Ave",
+            "city": "Austin",
+            "state": "TX",
+            "zip": "78701",
+            "phone": "5125550100",
+        },
+    )
+    r = c.post(
+        "/api/listings/nap-diff",
+        json={
+            "observed_name": "Test Dental",
+            "observed_address": "1100 Congress Avenue",
+            "observed_city": "Austin",
+            "observed_state": "TX",
+            "observed_zip": "78701",
+            "observed_phone": "+1 (512) 555-0100",
+            "directory": "Yelp",
+        },
+    )
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["pack"] == "nap-diff-v1"
+    assert d["overall"] == "formatting"
+    assert d["nap_match"] == 1
+    assert d["directory"] == "Yelp"

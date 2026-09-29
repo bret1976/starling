@@ -36,3 +36,14 @@ Live: https://starling-production-5190.up.railway.app
   (VADER MIT). Idea inspiration for a free local path without an LLM key:
   [haqaliz/rereflect](https://github.com/haqaliz/rereflect) (MIT) — no code copied.
 
+## NAP Diff Pack (`nap-diff-v1`)
+
+Backend-only Name/Address/Phone consistency grading for listings sync and API clients.
+
+- `POST /api/public/nap-diff` — free grade (nothing stored)
+- `POST /api/listings/nap-diff` — grade an observed listing vs the signed-in location
+- `POST /api/listings/sync` — OpenStreetMap / Google rows now store a JSON `detail` grade (`match` / `formatting` / `incomplete` / `mismatch`); `nap_match` stays 1 for match+formatting
+- Health: `nap_diff: "nap-diff-v1"`
+
+Idea inspiration: [Citewatch / local-seo-citation-tracker-mvp](https://github.com/bensblueprints/local-seo-citation-tracker-mvp) (MIT) — original Starling Python, no vendored UI or Node source.
+
