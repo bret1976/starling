@@ -39,6 +39,9 @@ def test_health():
     assert r.json()["product"] == "Starling"
     assert "delivery" in r.json()
 
+    assert r.json().get("quiet_hours") == "quiet-hours-v1"
+    assert r.json().get("nap_diff") == "nap-diff-v1"
+
 
 def test_no_seed_users():
     r = c.post("/api/auth/login", json={"email": "demo@northside.dental", "password": "demo1234"})

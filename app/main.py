@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app import deliver, grok, insights, local_replies, nap_diff, places
+from app import deliver, grok, insights, local_replies, nap_diff, places, quiet_hours
 from app.db import PLANS, SMS_COST, check_pw, connect, create_location, hash_pw, init, row, rows, slugify
 
 load_dotenv()
@@ -328,6 +328,7 @@ def health():
         "public_url": deliver.public_url(),
         "local_reply": local_replies.PACK,
         "nap_diff": nap_diff.PACK,
+        "quiet_hours": quiet_hours.PACK,
     }
 
 
@@ -735,8 +736,12 @@ def send_review_request(lid: int, customer_id: int, channel: str, request: Reque
             "error": "Copy the link and send it. Connect email or SMS later to send automatically.",
         }
     else:
-        result = deliver.deliver(channel, cust, f"Review request from {loc['name']}", body)
-        log_delivery(lid, channel, cust.get("phone") if channel == "sms" else cust.get("email"), body, result)
+        held = quiet_hours.guard_auto_delivery(channel)
+        if held:
+            result = held
+        else:
+            result = deliver.deliver(channel, cust, f"Review request from {loc['name']}", body)
+            log_delivery(lid, channel, cust.get("phone") if channel == "sms" else cust.get("email"), body, result)
     if result.get("ok"):
         status = "sent"
     elif channel == "link" or result.get("skipped"):
@@ -751,7 +756,7 @@ def send_review_request(lid: int, customer_id: int, channel: str, request: Reque
     con.commit()
     con.close()
     bill = meter(lid, "sms" if channel == "sms" else "email", 1) if result.get("ok") else None
-    return {
+    out = {
         "ok": True,
         "token": token,
         "link": link,
@@ -760,6 +765,10 @@ def send_review_request(lid: int, customer_id: int, channel: str, request: Reque
         "delivery": result,
         "sent": bool(result.get("ok")),
     }
+    if result.get("quiet_hours"):
+        out["quiet_hours"] = quiet_hours.summary()
+        out["held_for_quiet_hours"] = True
+    return out
 
 
 @app.get("/api/public/review/{token}")
