@@ -47,3 +47,15 @@ Backend-only Name/Address/Phone consistency grading for listings sync and API cl
 
 Idea inspiration: [Citewatch / local-seo-citation-tracker-mvp](https://github.com/bensblueprints/local-seo-citation-tracker-mvp) (MIT) — original Starling Python, no vendored UI or Node source.
 
+## Ask Cooldown Pack (`ask-cooldown-v1`)
+
+Backend-only Review Request Guard. Holds auto SMS/email when the same customer
+already got a successful ask inside `ASK_COOLDOWN_HOURS` (default 72). Link
+channel unchanged. Soft kill-switch: `ASK_COOLDOWN=0`.
+
+- Health: `ask_cooldown: "ask-cooldown-v1"`
+- Ops: `GET /api/ask-cooldown/summary`
+
+Idea inspiration: SafeAgent exactly-once receipts (Show HN) + privacy-timeguard
+(MIT) time windows — original Starling Python, no vendored code.
+

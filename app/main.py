@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app import deliver, grok, insights, local_replies, nap_diff, places, quiet_hours
+from app import ask_cooldown, deliver, grok, insights, local_replies, nap_diff, places, quiet_hours
 from app.db import PLANS, SMS_COST, check_pw, connect, create_location, hash_pw, init, row, rows, slugify
 
 load_dotenv()
@@ -329,7 +329,13 @@ def health():
         "local_reply": local_replies.PACK,
         "nap_diff": nap_diff.PACK,
         "quiet_hours": quiet_hours.PACK,
+        "ask_cooldown": ask_cooldown.PACK,
     }
+
+
+@app.get("/api/ask-cooldown/summary")
+def ask_cooldown_summary():
+    return {"ok": True, **ask_cooldown.summary()}
 
 
 @app.post("/api/auth/login")
@@ -736,12 +742,16 @@ def send_review_request(lid: int, customer_id: int, channel: str, request: Reque
             "error": "Copy the link and send it. Connect email or SMS later to send automatically.",
         }
     else:
-        held = quiet_hours.guard_auto_delivery(channel)
+        held = ask_cooldown.guard_auto_delivery(lid, customer_id, channel)
         if held:
             result = held
         else:
-            result = deliver.deliver(channel, cust, f"Review request from {loc['name']}", body)
-            log_delivery(lid, channel, cust.get("phone") if channel == "sms" else cust.get("email"), body, result)
+            held = quiet_hours.guard_auto_delivery(channel)
+            if held:
+                result = held
+            else:
+                result = deliver.deliver(channel, cust, f"Review request from {loc['name']}", body)
+                log_delivery(lid, channel, cust.get("phone") if channel == "sms" else cust.get("email"), body, result)
     if result.get("ok"):
         status = "sent"
     elif channel == "link" or result.get("skipped"):
@@ -768,6 +778,13 @@ def send_review_request(lid: int, customer_id: int, channel: str, request: Reque
     if result.get("quiet_hours"):
         out["quiet_hours"] = quiet_hours.summary()
         out["held_for_quiet_hours"] = True
+    if result.get("ask_cooldown"):
+        out["ask_cooldown"] = ask_cooldown.summary()
+        out["held_for_ask_cooldown"] = True
+        prev = result.get("previous") or {}
+        if prev.get("token"):
+            out["previous_link"] = absolute_link(f"/r/{prev['token']}", request)
+            out["previous_token"] = prev["token"]
     return out
 
 
