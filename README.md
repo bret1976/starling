@@ -59,3 +59,20 @@ channel unchanged. Soft kill-switch: `ASK_COOLDOWN=0`.
 Idea inspiration: SafeAgent exactly-once receipts (Show HN) + privacy-timeguard
 (MIT) time windows — original Starling Python, no vendored code.
 
+
+## Widget Guard Pack (`widget-guard-v1`)
+
+Backend-only spend brake for the public web-chat widget (`POST /api/widget/chat`, no login), which calls the paid
+Grok API for each message.
+
+- Paid AI replies capped per visitor (8 per 10 min; salted hash of the client IP, never stored raw), per location
+  (60/hour) and globally (300/hour). Only the first 2000 characters of a message go to Grok.
+- Over the cap the visitor gets the same fallback reply the widget already used when Grok was unavailable; the message
+  is still saved to the inbox and is not metered as AI. Response shape unchanged.
+- `GET /api/widget-guard/summary` (counts only), health `widget_guard: "widget-guard-v1"`.
+- Env: `WIDGET_GUARD=0` kill switch; `WIDGET_GUARD_CLIENT_AI_PER_WINDOW`, `WIDGET_GUARD_WINDOW_SEC`,
+  `WIDGET_GUARD_LOCATION_AI_PER_HOUR`, `WIDGET_GUARD_GLOBAL_AI_PER_HOUR`, `WIDGET_GUARD_PROMPT_CHARS`.
+
+Idea inspiration (no code copied): [laurentS/slowapi](https://github.com/laurentS/slowapi) (MIT),
+[animir/node-rate-limiter-flexible](https://github.com/animir/node-rate-limiter-flexible) (ISC),
+[express-rate-limit](https://github.com/express-rate-limit/express-rate-limit) (MIT).

@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app import ask_cooldown, deliver, grok, insights, local_replies, nap_diff, places, quiet_hours
+from app import ask_cooldown, deliver, grok, insights, local_replies, nap_diff, places, quiet_hours, widget_guard
 from app.db import PLANS, SMS_COST, check_pw, connect, create_location, hash_pw, init, row, rows, slugify
 
 load_dotenv()
@@ -330,12 +330,18 @@ def health():
         "nap_diff": nap_diff.PACK,
         "quiet_hours": quiet_hours.PACK,
         "ask_cooldown": ask_cooldown.PACK,
+        "widget_guard": widget_guard.PACK,
     }
 
 
 @app.get("/api/ask-cooldown/summary")
 def ask_cooldown_summary():
     return {"ok": True, **ask_cooldown.summary()}
+
+
+@app.get("/api/widget-guard/summary")
+def widget_guard_summary():
+    return {"ok": True, **widget_guard.summary()}
 
 
 @app.post("/api/auth/login")
@@ -1092,7 +1098,7 @@ async def inbox_ai(tid: int, request: Request):
 
 
 @app.post("/api/widget/chat")
-async def widget_chat(body: WidgetIn):
+async def widget_chat(request: Request, body: WidgetIn):
     con = connect()
     loc = row(con.execute("SELECT * FROM locations WHERE slug = ?", (body.slug,)).fetchone())
     if not loc:
@@ -1109,11 +1115,20 @@ async def widget_chat(body: WidgetIn):
     )
     con.commit()
     con.close()
-    try:
-        reply = await grok.inbox_reply(loc["name"], "webchat", body.body.strip())
-        meter(loc["id"], "ai", 1)
-    except Exception:
-        reply = f"Thanks — {loc['name']} received this and will reply from the inbox."
+    fallback = f"Thanks — {loc['name']} received this and will reply from the inbox."
+    # widget-guard-v1: public endpoint — cap paid Grok replies per visitor/location/global.
+    gate = widget_guard.check_ai(
+        loc["id"],
+        widget_guard.client_key(request.headers, request.client.host if request.client else None),
+    )
+    if not gate["allow"]:
+        reply = fallback
+    else:
+        try:
+            reply = await grok.inbox_reply(loc["name"], "webchat", widget_guard.ai_prompt(body.body.strip()))
+            meter(loc["id"], "ai", 1)
+        except Exception:
+            reply = fallback
     con = connect()
     con.execute(
         "INSERT INTO messages (thread_id, direction, body, created_at) VALUES (?,?,?,?)",

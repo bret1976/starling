@@ -42,6 +42,7 @@ def test_health():
     assert r.json().get("quiet_hours") == "quiet-hours-v1"
     assert r.json().get("nap_diff") == "nap-diff-v1"
     assert r.json().get("ask_cooldown") == "ask-cooldown-v1"
+    assert r.json().get("widget_guard") == "widget-guard-v1"
 
 
 def test_no_seed_users():
