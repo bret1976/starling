@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app import ask_cooldown, deliver, grok, insights, local_replies, nap_diff, places, quiet_hours, widget_guard
+from app import ask_cooldown, deliver, grok, insights, local_replies, login_throttle, nap_diff, places, quiet_hours, widget_guard
 from app.db import PLANS, SMS_COST, check_pw, connect, create_location, hash_pw, init, row, rows, slugify
 
 load_dotenv()
@@ -331,6 +331,7 @@ def health():
         "quiet_hours": quiet_hours.PACK,
         "ask_cooldown": ask_cooldown.PACK,
         "widget_guard": widget_guard.PACK,
+        "login_throttle": login_throttle.PACK,
     }
 
 
@@ -344,13 +345,35 @@ def widget_guard_summary():
     return {"ok": True, **widget_guard.summary()}
 
 
+@app.get("/api/login-throttle/summary")
+def login_throttle_summary():
+    return {"ok": True, **login_throttle.summary()}
+
+
+def _login_throttle_deny(gate: dict) -> JSONResponse:
+    retry = int(gate.get("retry_after_sec") or 1)
+    resp = JSONResponse(
+        {"ok": False, "error": "too many login attempts", "reason": gate.get("reason"), "retry_after_sec": retry},
+        status_code=429,
+    )
+    resp.headers["Retry-After"] = str(retry)
+    return resp
+
+
 @app.post("/api/auth/login")
 def login(request: Request, body: LoginIn):
+    email = body.email.strip().lower()
+    key = login_throttle.client_key(request.headers, request.client.host if request.client else None)
+    gate = login_throttle.check_attempt(key=key, email=email)
+    if not gate["allow"]:
+        return _login_throttle_deny(gate)
     con = connect()
-    u = row(con.execute("SELECT * FROM users WHERE email = ?", (body.email.strip().lower(),)).fetchone())
+    u = row(con.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone())
     if not u or not check_pw(body.password, u["password_hash"]):
         con.close()
+        login_throttle.record_failure(email)
         raise HTTPException(401, "invalid email or password")
+    login_throttle.clear_failures(email)
     token = secrets.token_urlsafe(24)
     con.execute("INSERT INTO sessions (token, user_id, created_at) VALUES (?,?,?)", (token, u["id"], time.time()))
     con.commit()
@@ -364,6 +387,10 @@ def login(request: Request, body: LoginIn):
 @app.post("/api/auth/signup")
 def signup(request: Request, body: SignupIn):
     email = body.email.strip().lower()
+    skey = login_throttle.client_key(request.headers, request.client.host if request.client else None)
+    sgate = login_throttle.check_attempt(key=skey, email=None)
+    if not sgate["allow"]:
+        return _login_throttle_deny(sgate)
     if len(body.password) < 8:
         raise HTTPException(400, "password must be 8+ characters")
     if not body.business.strip():

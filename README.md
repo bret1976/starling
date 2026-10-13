@@ -76,3 +76,12 @@ Grok API for each message.
 Idea inspiration (no code copied): [laurentS/slowapi](https://github.com/laurentS/slowapi) (MIT),
 [animir/node-rate-limiter-flexible](https://github.com/animir/node-rate-limiter-flexible) (ISC),
 [express-rate-limit](https://github.com/express-rate-limit/express-rate-limit) (MIT).
+
+## Login Throttle Pack (`login-throttle-v1`)
+
+Backend-only brute-force guard on `POST /api/auth/login` (and a shared attempt budget on signup).
+
+- Per-client sliding window (default 20 / 15 min, salted IP hash), per-email failure lockout (8 fails / window), global cap (400 / hour).
+- Over limit → HTTP 429 + `Retry-After`; password is not checked. Successful login clears that email's failures.
+- Kill switch: `LOGIN_THROTTLE=0`. Summary: `GET /api/login-throttle/summary`. Health marker `login_throttle`.
+- Original Starling Python. Idea inspiration (no code copied): [jazzband/django-axes](https://github.com/jazzband/django-axes) (MIT), [laurentS/slowapi](https://github.com/laurentS/slowapi) (MIT), express-rate-limit (MIT).
