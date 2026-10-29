@@ -382,8 +382,8 @@ async function openThread(id) {
     }
   };
   $("send").onclick = async () => {
-    await api(`/api/inbox/${id}/reply`, { method: "POST", body: { body: $("reply").value } });
-    toast("Sent");
+    const r = await api(`/api/inbox/${id}/reply`, { method: "POST", body: { body: $("reply").value } });
+    toast(r && r.sent ? "Sent" : "Saved — not sent (email/SMS delivery is off)");
     openThread(id);
   };
 }

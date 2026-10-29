@@ -8,10 +8,11 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from app import web_hardening
 from app import ask_cooldown, deliver, grok, insights, local_replies, login_throttle, nap_diff, places, quiet_hours, widget_guard
 from app.db import PLANS, SMS_COST, check_pw, connect, create_location, hash_pw, init, row, rows, slugify
 
@@ -21,6 +22,17 @@ STATIC = ROOT / "static"
 
 app = FastAPI(title="Starling")
 app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
+app.add_middleware(web_hardening.HardeningMiddleware)
+
+
+@app.get("/robots.txt", include_in_schema=False)
+def robots():
+    return PlainTextResponse(web_hardening.robots_txt())
+
+
+@app.get("/sitemap.xml", include_in_schema=False)
+def sitemap():
+    return Response(web_hardening.sitemap_xml(), media_type="application/xml")
 
 
 @app.on_event("startup")
