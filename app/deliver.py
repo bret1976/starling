@@ -12,8 +12,36 @@ def public_url() -> str:
     return (os.environ.get("PUBLIC_URL") or "http://127.0.0.1:8790").rstrip("/")
 
 
-def mail_ready() -> bool:
+INKBOX_API_BASE = "https://inkbox.ai/api/v1/mail"
+
+
+def inkbox_ready() -> bool:
+    return bool(os.environ.get("INKBOX_API_KEY") and os.environ.get("INKBOX_FROM"))
+
+
+def smtp_ready() -> bool:
     return bool(os.environ.get("SMTP_HOST") and os.environ.get("SMTP_FROM"))
+
+
+def mail_ready() -> bool:
+    return inkbox_ready() or smtp_ready()
+
+
+def send_email_inkbox(to: str, subject: str, body: str) -> dict:
+    key = os.environ["INKBOX_API_KEY"].strip()
+    frm = os.environ["INKBOX_FROM"].strip()
+    try:
+        r = httpx.post(
+            f"{INKBOX_API_BASE}/mailboxes/{frm}/messages",
+            headers={"X-API-Key": key, "Content-Type": "application/json"},
+            json={"recipients": {"to": [to]}, "subject": subject[:998], "body_text": body},
+            timeout=20.0,
+        )
+        if r.status_code >= 300:
+            return {"ok": False, "channel": "email", "provider": "inkbox", "error": f"Inkbox {r.status_code}: {r.text[:250]}"}
+        return {"ok": True, "channel": "email", "provider": "inkbox", "to": to}
+    except Exception as e:
+        return {"ok": False, "channel": "email", "provider": "inkbox", "error": str(e)[:300]}
 
 
 def sms_ready() -> bool:
@@ -29,7 +57,18 @@ def send_email(to: str, subject: str, body: str) -> dict:
     if not to or "@" not in to:
         return {"ok": False, "channel": "email", "error": "no recipient email"}
     if not mail_ready():
-        return {"ok": False, "channel": "email", "error": "SMTP_HOST and SMTP_FROM are not set"}
+        return {"ok": False, "channel": "email", "error": "Email is not configured (set INKBOX_API_KEY + INKBOX_FROM, or SMTP_HOST + SMTP_FROM)"}
+    if inkbox_ready():
+        result = send_email_inkbox(to, subject, body)
+        if result["ok"] or not smtp_ready():
+            return result
+        smtp_result = send_email_smtp(to, subject, body)
+        smtp_result["fallback_from"] = "inkbox"
+        return smtp_result
+    return send_email_smtp(to, subject, body)
+
+
+def send_email_smtp(to: str, subject: str, body: str) -> dict:
     host = os.environ["SMTP_HOST"]
     port = int(os.environ.get("SMTP_PORT") or 587)
     user = os.environ.get("SMTP_USER") or ""
